@@ -47,20 +47,20 @@ mod peer_id;
 mod translation;
 
 pub mod connection;
-pub mod either;
+//pub mod either;
 pub mod identity;
 pub mod muxing;
 pub mod network;
 pub mod transport;
-pub mod upgrade;
+//pub mod upgrade;
 
 pub use multiaddr::Multiaddr;
 pub use muxing::StreamMuxer;
 pub use peer_id::PeerId;
 pub use identity::PublicKey;
-pub use transport::Transport;
+pub use transport::{Dialer, Transport};
 pub use translation::address_translation;
-pub use upgrade::{InboundUpgrade, OutboundUpgrade, UpgradeInfo, UpgradeError, ProtocolName};
+//pub use upgrade::{InboundUpgrade, OutboundUpgrade, UpgradeInfo, UpgradeError, ProtocolName};
 pub use connection::{Connected, Endpoint, ConnectedPoint, ConnectionInfo};
 pub use network::Network;
 

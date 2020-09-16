@@ -31,22 +31,46 @@ use multiaddr::Multiaddr;
 use std::{error::Error, fmt};
 use std::time::Duration;
 
-pub mod and_then;
-pub mod boxed;
-pub mod choice;
-pub mod dummy;
-pub mod map;
-pub mod map_err;
-pub mod memory;
-pub mod timeout;
-pub mod upgrade;
+//pub mod and_then;
+//pub mod boxed;
+//pub mod choice;
+//pub mod dummy;
+//pub mod map;
+//pub mod map_err;
+//pub mod memory;
+//pub mod timeout;
+//pub mod upgrade;
 
-mod optional;
+//mod optional;
 
-pub use self::choice::OrTransport;
-pub use self::memory::MemoryTransport;
-pub use self::optional::OptionalTransport;
-pub use self::upgrade::Upgrade;
+//pub use self::choice::OrTransport;
+//pub use self::memory::MemoryTransport;
+//pub use self::optional::OptionalTransport;
+//pub use self::upgrade::Upgrade;
+
+pub trait Dialer {
+    /// The result of a connection setup process, including protocol upgrades.
+    ///
+    /// Typically the output contains at least a handle to a data stream (i.e. a
+    /// connection or a substream multiplexer on top of a connection) that
+    /// provides APIs for sending and receiving data through the connection.
+    type Output;
+
+    /// An error that occurred during connection setup.
+    type Error: Error;
+
+    /// A pending [`Output`](Transport::Output) for an outbound connection,
+    /// obtained from [dialing](Transport::dial).
+    type Dial: Future<Output = Result<Self::Output, Self::Error>>;
+
+    /// Dials the given [`Multiaddr`], returning a future for a pending outbound connection.
+    ///
+    /// If [`TransportError::MultiaddrNotSupported`] is returned, it may be desirable to
+    /// try an alternative [`Transport`], if available.
+    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>>
+    where
+        Self: Sized;
+}
 
 /// A transport provides connection-oriented communication between two peers
 /// through ordered streams of data (i.e. connections).
@@ -74,17 +98,7 @@ pub use self::upgrade::Upgrade;
 /// >           words, listening or dialing consumes the transport object. This has been designed
 /// >           so that you would implement this trait on `&Foo` or `&mut Foo` instead of directly
 /// >           on `Foo`.
-pub trait Transport {
-    /// The result of a connection setup process, including protocol upgrades.
-    ///
-    /// Typically the output contains at least a handle to a data stream (i.e. a
-    /// connection or a substream multiplexer on top of a connection) that
-    /// provides APIs for sending and receiving data through the connection.
-    type Output;
-
-    /// An error that occurred during connection setup.
-    type Error: Error;
-
+pub trait Transport: Dialer {
     /// A stream of [`Output`](Transport::Output)s for inbound connections.
     ///
     /// An item should be produced whenever a connection is received at the lowest level of the
@@ -94,7 +108,8 @@ pub trait Transport {
     ///
     /// If this stream produces an error, it is considered fatal and the listener is killed. It
     /// is possible to report non-fatal errors by producing a [`ListenerEvent::Error`].
-    type Listener: Stream<Item = Result<ListenerEvent<Self::ListenerUpgrade, Self::Error>, Self::Error>>;
+    type Listener: Dialer<Output = Self::Output, Error = Self::Error, Dial = Self::Dial> +
+        Stream<Item = Result<ListenerEvent<Self::ListenerUpgrade, Self::Error>, Self::Error>>;
 
     /// A pending [`Output`](Transport::Output) for an inbound connection,
     /// obtained from the [`Listener`](Transport::Listener) stream.
@@ -107,10 +122,6 @@ pub trait Transport {
     /// of the connection setup process.
     type ListenerUpgrade: Future<Output = Result<Self::Output, Self::Error>>;
 
-    /// A pending [`Output`](Transport::Output) for an outbound connection,
-    /// obtained from [dialing](Transport::dial).
-    type Dial: Future<Output = Result<Self::Output, Self::Error>>;
-
     /// Listens on the given [`Multiaddr`], producing a stream of pending, inbound connections
     /// and addresses this transport is listening on (cf. [`ListenerEvent`]).
     ///
@@ -120,14 +131,7 @@ pub trait Transport {
     where
         Self: Sized;
 
-    /// Dials the given [`Multiaddr`], returning a future for a pending outbound connection.
-    ///
-    /// If [`TransportError::MultiaddrNotSupported`] is returned, it may be desirable to
-    /// try an alternative [`Transport`], if available.
-    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>>
-    where
-        Self: Sized;
-
+/*
     /// Turns the transport into an abstract boxed (i.e. heap-allocated) transport.
     fn boxed(self) -> boxed::Boxed<Self::Output, Self::Error>
     where Self: Sized + Clone + Send + Sync + 'static,
@@ -222,7 +226,7 @@ pub trait Transport {
         Self::Error: 'static
     {
         upgrade::Builder::new(self, version)
-    }
+    }*/
 }
 
 /// Event produced by [`Transport::Listener`]s.
