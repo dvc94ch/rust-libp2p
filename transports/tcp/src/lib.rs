@@ -34,6 +34,7 @@ use futures_timer::Delay;
 use get_if_addrs::{IfAddr, get_if_addrs};
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use libp2p_core::{
+    Dialer,
     Transport,
     multiaddr::{Protocol, Multiaddr},
     transport::{ListenerEvent, TransportError}
@@ -92,12 +93,38 @@ impl $tcp_config {
     }
 }
 
-impl Transport for $tcp_config {
+impl Dialer for $tcp_config {
     type Output = $tcp_trans_stream;
     type Error = io::Error;
-    type Listener = Pin<Box<dyn Stream<Item = Result<ListenerEvent<Self::ListenerUpgrade, Self::Error>, Self::Error>> + Send>>;
-    type ListenerUpgrade = Ready<Result<Self::Output, Self::Error>>;
     type Dial = Pin<Box<dyn Future<Output = Result<$tcp_trans_stream, io::Error>> + Send>>;
+
+    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
+        let socket_addr =
+            if let Ok(socket_addr) = multiaddr_to_socketaddr(&addr) {
+                if socket_addr.port() == 0 || socket_addr.ip().is_unspecified() {
+                    debug!("Instantly refusing dialing {}, as it is invalid", addr);
+                    return Err(TransportError::Other(io::ErrorKind::ConnectionRefused.into()))
+                }
+                socket_addr
+            } else {
+                return Err(TransportError::MultiaddrNotSupported(addr))
+            };
+
+        debug!("Dialing {}", addr);
+
+        async fn do_dial(cfg: $tcp_config, socket_addr: SocketAddr) -> Result<$tcp_trans_stream, io::Error> {
+            let stream = <$tcp_stream>::connect(&socket_addr).await?;
+            $apply_config(&cfg, &stream)?;
+            Ok($tcp_trans_stream { inner: stream })
+        }
+
+        Ok(Box::pin(do_dial(self, socket_addr)))
+    }
+}
+
+impl Transport for $tcp_config {
+    type Listener = $tcp_listen_stream;
+    type ListenerUpgrade = Ready<Result<Self::Output, Self::Error>>;
 
     fn listen_on(self, addr: Multiaddr) -> Result<Self::Listener, TransportError<Self::Error>> {
         let socket_addr =
@@ -107,9 +134,7 @@ impl Transport for $tcp_config {
                 return Err(TransportError::MultiaddrNotSupported(addr))
             };
 
-        async fn do_listen(cfg: $tcp_config, socket_addr: SocketAddr)
-            -> Result<impl Stream<Item = Result<ListenerEvent<Ready<Result<$tcp_trans_stream, io::Error>>, io::Error>, io::Error>>, io::Error>
-        {
+        fn do_listen(cfg: $tcp_config, socket_addr: SocketAddr) -> Result<$tcp_listen_stream, io::Error> {
             let socket = if socket_addr.is_ipv4() {
                 Socket::new(Domain::ipv4(), Type::stream(), Some(socket2::Protocol::tcp()))?
             } else {
@@ -119,6 +144,7 @@ impl Transport for $tcp_config {
             };
             if cfg!(target_family = "unix") {
                 socket.set_reuse_address(true)?;
+                socket.set_reuse_port(true)?;
             }
             socket.bind(&socket_addr.into())?;
             socket.listen(1024)?; // we may want to make this configurable
@@ -171,33 +197,10 @@ impl Transport for $tcp_config {
                 config: cfg
             };
 
-            Ok(stream::unfold(listen_stream, |s| s.next().map(Some)))
+            Ok(listen_stream)
         }
-
-        Ok(Box::pin(do_listen(self, socket_addr).try_flatten_stream()))
-    }
-
-    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
-        let socket_addr =
-            if let Ok(socket_addr) = multiaddr_to_socketaddr(&addr) {
-                if socket_addr.port() == 0 || socket_addr.ip().is_unspecified() {
-                    debug!("Instantly refusing dialing {}, as it is invalid", addr);
-                    return Err(TransportError::Other(io::ErrorKind::ConnectionRefused.into()))
-                }
-                socket_addr
-            } else {
-                return Err(TransportError::MultiaddrNotSupported(addr))
-            };
-
-        debug!("Dialing {}", addr);
-
-        async fn do_dial(cfg: $tcp_config, socket_addr: SocketAddr) -> Result<$tcp_trans_stream, io::Error> {
-            let stream = <$tcp_stream>::connect(&socket_addr).await?;
-            $apply_config(&cfg, &stream)?;
-            Ok($tcp_trans_stream { inner: stream })
-        }
-
-        Ok(Box::pin(do_dial(self, socket_addr)))
+        do_listen(self, socket_addr)
+            .map_err(|e| TransportError::Other(e))
     }
 }
 
@@ -220,26 +223,91 @@ pub struct $tcp_listen_stream {
     config: $tcp_config
 }
 
-impl $tcp_listen_stream {
+impl Dialer for $tcp_listen_stream {
+    type Output = $tcp_trans_stream;
+    type Error = io::Error;
+    type Dial = Pin<Box<dyn Future<Output = Result<$tcp_trans_stream, io::Error>> + Send>>;
+
+    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
+        let socket_addr =
+            if let Ok(socket_addr) = multiaddr_to_socketaddr(&addr) {
+                if socket_addr.port() == 0 || socket_addr.ip().is_unspecified() {
+                    debug!("Instantly refusing dialing {}, as it is invalid", addr);
+                    return Err(TransportError::Other(io::ErrorKind::ConnectionRefused.into()))
+                }
+                socket_addr
+            } else {
+                return Err(TransportError::MultiaddrNotSupported(addr))
+            };
+
+        let local_socket_addr = self.stream.local_addr()
+            .map_err(|e| TransportError::Other(e))?;
+
+        debug!("Dialing {}", addr);
+
+        async fn do_dial(
+            cfg: $tcp_config,
+            local_socket_addr: SocketAddr,
+            socket_addr: SocketAddr,
+        ) -> Result<$tcp_trans_stream, io::Error> {
+            let domain = if local_socket_addr.is_ipv4() {
+                Domain::ipv4()
+            } else {
+                Domain::ipv6()
+            };
+            let socket = Socket::new(domain, Type::stream(), Some(socket2::Protocol::tcp()))?;
+            if local_socket_addr.is_ipv6() {
+                socket.set_only_v6(true)?;
+            }
+            if cfg!(target_family = "unix") {
+                socket.set_reuse_address(true)?;
+                socket.set_reuse_port(true)?;
+            }
+            socket.bind(&local_socket_addr.into())?;
+            socket.connect(&socket_addr.into())?;
+
+            let stream = <$tcp_stream>::try_from(socket.into_tcp_stream())
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            $apply_config(&cfg, &stream)?;
+            Ok($tcp_trans_stream { inner: stream })
+        }
+
+        Ok(Box::pin(do_dial(self.config, local_socket_addr, socket_addr)))
+    }
+}
+
+impl Stream for $tcp_listen_stream {
+    type Item =  Result<ListenerEvent<Ready<Result<$tcp_trans_stream, io::Error>>, io::Error>, io::Error>;
+
     /// Takes ownership of the listener, and returns the next incoming event and the listener.
-    async fn next(mut self) -> (Result<ListenerEvent<Ready<Result<$tcp_trans_stream, io::Error>>, io::Error>, io::Error>, Self) {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let me = Pin::into_inner(self);
         loop {
-            if let Some(event) = self.pending.pop_front() {
-                return (event, self);
+            if let Some(event) = me.pending.pop_front() {
+                return Poll::Ready(Some(event));
             }
 
-            if let Some(pause) = self.pause.take() {
-                let _ = pause.await;
+            if let Some(mut pause) = me.pause.take() {
+                match Pin::new(&mut pause).poll(cx) {
+                    Poll::Ready(()) => {}
+                    Poll::Pending => {
+                        me.pause = Some(pause);
+                        return Poll::Pending;
+                    }
+                }
             }
 
             // TODO: do we get the peer_addr at the same time?
-            let (sock, _) = match self.stream.accept().await {
-                Ok(s) => s,
-                Err(e) => {
+
+            let sock = match Pin::new(&mut me.stream.incoming()).poll_next(cx) {
+                Poll::Ready(Some(Ok(s))) => s,
+                Poll::Ready(Some(Err(e))) => {
                     debug!("error accepting incoming connection: {}", e);
-                    self.pause = Some(Delay::new(self.pause_duration));
-                    return (Ok(ListenerEvent::Error(e)), self);
+                    me.pause = Some(Delay::new(me.pause_duration));
+                    return Poll::Ready(Some(Ok(ListenerEvent::Error(e))));
                 }
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(None) => return Poll::Ready(None),
             };
 
             let sock_addr = match sock.peer_addr() {
@@ -252,9 +320,9 @@ impl $tcp_listen_stream {
 
             let local_addr = match sock.local_addr() {
                 Ok(sock_addr) => {
-                    if let Addresses::Many(ref mut addrs) = self.addrs {
-                        if let Err(err) = check_for_interface_changes(&sock_addr, self.port, addrs, &mut self.pending) {
-                            return (Ok(ListenerEvent::Error(err)), self);
+                    if let Addresses::Many(ref mut addrs) = me.addrs {
+                        if let Err(err) = check_for_interface_changes(&sock_addr, me.port, addrs, &mut me.pending) {
+                            return Poll::Ready(Some(Ok(ListenerEvent::Error(err))));
                         }
                     }
                     ip_to_multiaddr(sock_addr.ip(), sock_addr.port())
@@ -267,10 +335,10 @@ impl $tcp_listen_stream {
 
             let remote_addr = ip_to_multiaddr(sock_addr.ip(), sock_addr.port());
 
-            match $apply_config(&self.config, &sock) {
+            match $apply_config(&me.config, &sock) {
                 Ok(()) => {
                     trace!("Incoming connection from {} at {}", remote_addr, local_addr);
-                    self.pending.push_back(Ok(ListenerEvent::Upgrade {
+                    me.pending.push_back(Ok(ListenerEvent::Upgrade {
                         upgrade: future::ok($tcp_trans_stream { inner: sock }),
                         local_addr,
                         remote_addr
@@ -278,7 +346,7 @@ impl $tcp_listen_stream {
                 }
                 Err(err) => {
                     debug!("Error upgrading incoming connection from {}: {:?}", remote_addr, err);
-                    self.pending.push_back(Ok(ListenerEvent::Upgrade {
+                    me.pending.push_back(Ok(ListenerEvent::Upgrade {
                         upgrade: future::err(err),
                         local_addr,
                         remote_addr
@@ -493,7 +561,7 @@ fn check_for_interface_changes<T>(
 #[cfg(test)]
 mod tests {
     use futures::prelude::*;
-    use libp2p_core::{Transport, multiaddr::{Multiaddr, Protocol}, transport::ListenerEvent};
+    use libp2p_core::{Dialer, Transport, multiaddr::{Multiaddr, Protocol}, transport::ListenerEvent};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use super::multiaddr_to_socketaddr;
     #[cfg(feature = "async-std")]
@@ -626,6 +694,54 @@ mod tests {
 
                 // Obtain a future socket through dialing
                 let mut socket = tcp.dial(addr.clone()).unwrap().await.unwrap();
+                socket.write_all(&[0x1, 0x2, 0x3]).await.unwrap();
+
+                let mut buf = [0u8; 3];
+                socket.read_exact(&mut buf).await.unwrap();
+                assert_eq!(buf, [4, 5, 6]);
+            });
+        }
+
+        test("/ip4/127.0.0.1/tcp/0".parse().unwrap());
+        test("/ip6/::1/tcp/0".parse().unwrap());
+    }
+
+    #[test]
+    #[cfg(feature = "async-std")]
+    fn port_reuse() {
+        fn test(addr: Multiaddr) {
+            let (ready_tx, ready_rx) = futures::channel::oneshot::channel();
+            let mut ready_tx = Some(ready_tx);
+            let addr2 = addr.clone();
+
+            async_std::task::spawn(async move {
+                let tcp = TcpConfig::new();
+                let mut listener = tcp.listen_on(addr).unwrap();
+
+                loop {
+                    match listener.next().await.unwrap().unwrap() {
+                        ListenerEvent::NewAddress(listen_addr) => {
+                            ready_tx.take().unwrap().send(listen_addr).unwrap();
+                        },
+                        ListenerEvent::Upgrade { upgrade, .. } => {
+                            let mut upgrade = upgrade.await.unwrap();
+                            let mut buf = [0u8; 3];
+                            upgrade.read_exact(&mut buf).await.unwrap();
+                            assert_eq!(buf, [1, 2, 3]);
+                            upgrade.write_all(&[4, 5, 6]).await.unwrap();
+                        },
+                        _ => unreachable!()
+                    }
+                }
+            });
+
+            async_std::task::block_on(async move {
+                let dest_addr = ready_rx.await.unwrap();
+                let tcp = TcpConfig::new();
+                let listener = tcp.listen_on(addr2).unwrap();
+
+                // Obtain a future socket through dialing
+                let mut socket = listener.dial(dest_addr).unwrap().await.unwrap();
                 socket.write_all(&[0x1, 0x2, 0x3]).await.unwrap();
 
                 let mut buf = [0u8; 3];
