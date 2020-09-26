@@ -34,7 +34,7 @@ use std::time::Duration;
 //pub mod and_then;
 //pub mod boxed;
 //pub mod choice;
-//pub mod dummy;
+pub mod dummy;
 //pub mod map;
 //pub mod map_err;
 //pub mod memory;

@@ -18,26 +18,89 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use crate::transport::{Transport, TransportError, ListenerEvent};
+use crate::transport::{Dialer, Transport, TransportError, ListenerEvent};
 use crate::Multiaddr;
 use futures::{prelude::*, task::Context, task::Poll};
 use std::{fmt, io, marker::PhantomData, pin::Pin};
 
+type TError = io::Error;
+type TDial<TOut> = futures::future::Pending<Result<TOut, TError>>;
+type TListenerUpgrade<TOut> = futures::future::Pending<Result<TOut, TError>>;
+
+/// Implementation of `Dialer` that doesn't support any multiaddr.
+///
+/// Useful for testing purposes, or as a fallback implementation when no protocol is available.
+pub struct DummyDialer<TOut>(PhantomData<TOut>);
+
+impl<TOut> Dialer for DummyDialer<TOut> {
+    type Output = TOut;
+    type Error = TError;
+    type Dial = TDial<TOut>;
+
+    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
+        Err(TransportError::MultiaddrNotSupported(addr))
+    }
+}
+
+impl<TOut> DummyDialer<TOut> {
+    /// Builds a new `DummyDialer`.
+    pub fn new() -> Self {
+        DummyDialer(PhantomData)
+    }
+}
+
+impl<TOut> Default for DummyDialer<TOut> {
+    fn default() -> Self {
+        DummyDialer::new()
+    }
+}
+
+impl<TOut> fmt::Debug for DummyDialer<TOut> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DummyTransport")
+    }
+}
+
+impl<TOut> Clone for DummyDialer<TOut> {
+    fn clone(&self) -> Self {
+        DummyDialer(PhantomData)
+    }
+}
+
+/// Implementation of `Dialer` that doesn't support any multiaddr.
+///
+/// Useful for testing purposes, or as a fallback implementation when no protocol is available.
+#[derive(Clone, Default)]
+pub struct DummyListener<TOut>(DummyDialer<TOut>);
+
+impl<TOut> Dialer for DummyListener<TOut> {
+    type Output = TOut;
+    type Error = TError;
+    type Dial = TDial<TOut>;
+
+    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
+        self.0.dial(addr)
+    }
+}
+
+impl<TOut> Stream for DummyListener<TOut> {
+    type Item = Result<ListenerEvent<TListenerUpgrade<TOut>, TError>, TError>;
+
+    fn poll_next(self: Pin<&mut Self>, _: &mut Context) -> Poll<Option<Self::Item>> {
+        Poll::Pending
+    }
+}
+
 /// Implementation of `Transport` that doesn't support any multiaddr.
 ///
 /// Useful for testing purposes, or as a fallback implementation when no protocol is available.
-pub struct DummyTransport<TOut = DummyStream>(PhantomData<TOut>);
+#[derive(Clone, Default)]
+pub struct DummyTransport<TOut = DummyStream>(DummyDialer<TOut>);
 
 impl<TOut> DummyTransport<TOut> {
     /// Builds a new `DummyTransport`.
     pub fn new() -> Self {
-        DummyTransport(PhantomData)
-    }
-}
-
-impl<TOut> Default for DummyTransport<TOut> {
-    fn default() -> Self {
-        DummyTransport::new()
+        DummyTransport(DummyDialer::new())
     }
 }
 
@@ -47,24 +110,21 @@ impl<TOut> fmt::Debug for DummyTransport<TOut> {
     }
 }
 
-impl<TOut> Clone for DummyTransport<TOut> {
-    fn clone(&self) -> Self {
-        DummyTransport(PhantomData)
+impl<TOut> Dialer for DummyTransport<TOut> {
+    type Output = TOut;
+    type Error = TError;
+    type Dial = TDial<TOut>;
+
+    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
+        self.0.dial(addr)
     }
 }
 
 impl<TOut> Transport for DummyTransport<TOut> {
-    type Output = TOut;
-    type Error = io::Error;
-    type Listener = futures::stream::Pending<Result<ListenerEvent<Self::ListenerUpgrade, Self::Error>, Self::Error>>;
-    type ListenerUpgrade = futures::future::Pending<Result<Self::Output, io::Error>>;
-    type Dial = futures::future::Pending<Result<Self::Output, io::Error>>;
+    type ListenerUpgrade = TListenerUpgrade<TOut>;
+    type Listener = DummyListener<TOut>;
 
     fn listen_on(self, addr: Multiaddr) -> Result<Self::Listener, TransportError<Self::Error>> {
-        Err(TransportError::MultiaddrNotSupported(addr))
-    }
-
-    fn dial(self, addr: Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
         Err(TransportError::MultiaddrNotSupported(addr))
     }
 }
