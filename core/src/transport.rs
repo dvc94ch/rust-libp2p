@@ -37,7 +37,7 @@ use std::time::Duration;
 pub mod dummy;
 //pub mod map;
 //pub mod map_err;
-//pub mod memory;
+pub mod memory;
 //pub mod timeout;
 //pub mod upgrade;
 
