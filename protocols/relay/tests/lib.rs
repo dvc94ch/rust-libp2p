@@ -145,6 +145,7 @@ fn node_a_connect_to_node_b_listening_via_relay() {
                         break;
                     }
                     SwarmEvent::Behaviour(PingEvent { .. }) => {}
+                    SwarmEvent::NewListenAddr(_) => {}
                     e => panic!("{:?}", e),
                 }
             }

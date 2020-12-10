@@ -42,14 +42,15 @@ impl<T: Clone> RelayTransportWrapper<T> {
     /// listening for both relayed as well as native connections.
     ///
     ///```
+    /// # use libp2p_core::identity::Keypair;
     /// # use libp2p_core::transport::dummy::DummyTransport;
     /// # use libp2p_relay::{Relay, RelayTransportWrapper};
-    ///
+    /// let peer_id = Keypair::generate_ed25519().public().into_peer_id();
     /// let inner_transport = DummyTransport::<()>::new();
     /// let (wrapper_transport, (channels)) = RelayTransportWrapper::new(inner_transport);
     /// let (to_transport, from_transport) = channels;
     ///
-    /// let behaviour = Relay::new(to_transport, from_transport);
+    /// let behaviour = Relay::new(peer_id, to_transport, from_transport);
     ///```
     pub fn new(
         t: T,
@@ -266,6 +267,9 @@ impl<T: Transport> Stream for RelayListener<T> {
         }
 
         match this.from_behaviour.lock().unwrap().poll_next_unpin(cx) {
+            Poll::Ready(Some(BehaviourToTransportMsg::NewAddress(addr))) => {
+                return Poll::Ready(Some(Ok(ListenerEvent::NewAddress(addr))));
+            }
             Poll::Ready(Some(BehaviourToTransportMsg::IncomingRelayedConnection {
                 stream,
                 source,

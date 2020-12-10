@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut swarm = Swarm::new(
         transport,
-        Relay::new(to_transport, from_transport),
+        Relay::new(local_peer_id.clone(), to_transport, from_transport),
         local_peer_id,
     );
 

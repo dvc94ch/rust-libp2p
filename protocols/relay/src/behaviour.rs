@@ -27,11 +27,11 @@ use futures::channel::{mpsc, oneshot};
 use futures::prelude::*;
 use libp2p_core::{
     connection::{ConnectedPoint, ConnectionId, ListenerId},
-    multiaddr::Multiaddr,
+    multiaddr::{Multiaddr, Protocol},
     PeerId,
 };
 use libp2p_swarm::{
-    DialPeerCondition, NegotiatedSubstream, NetworkBehaviour, NetworkBehaviourAction,
+    AddressScore, DialPeerCondition, NegotiatedSubstream, NetworkBehaviour, NetworkBehaviourAction,
     NotifyHandler, PollParameters, ProtocolsHandler,
 };
 use std::collections::{HashMap, VecDeque};
@@ -62,6 +62,9 @@ pub struct Relay {
 
     /// List of relay nodes that act as a listener for the local node acting as a destination.
     relay_listeners: HashMap<PeerId, RelayListener>,
+
+    /// Our peer id.
+    peer_id: PeerId,
 }
 
 enum OutgoingRelayRequest {
@@ -91,10 +94,12 @@ enum IncomingRelayRequest {
 impl Relay {
     /// Builds a new `Relay` behaviour.
     pub fn new(
+        peer_id: PeerId,
         to_transport: mpsc::Sender<BehaviourToTransportMsg>,
         from_transport: mpsc::Receiver<TransportToBehaviourMsg>,
     ) -> Self {
         Relay {
+            peer_id,
             to_transport,
             from_transport,
             outbox_to_transport: Default::default(),
@@ -103,6 +108,20 @@ impl Relay {
             incoming_relay_requests: Default::default(),
             outgoing_relay_requests: Default::default(),
             relay_listeners: Default::default(),
+        }
+    }
+
+    fn new_relay_address(&mut self, address: Multiaddr, peer_id: PeerId) -> NetworkBehaviourAction<RelayHandlerIn, ()> {
+        self.relay_listeners
+            .insert(peer_id.clone(), RelayListener::Connected(address.clone()));
+        let external_address = address
+            .with(Protocol::P2p(peer_id.into()))
+            .with(Protocol::P2pCircuit)
+            .with(Protocol::P2p(self.peer_id.clone().into()));
+        self.outbox_to_transport.push(BehaviourToTransportMsg::NewAddress(external_address.clone()));
+        NetworkBehaviourAction::ReportObservedAddr {
+            address: external_address,
+            score: AddressScore::Finite(10),
         }
     }
 }
@@ -165,8 +184,8 @@ impl NetworkBehaviour for Relay {
         self.connected_peers.insert(id.clone());
 
         if let Some(RelayListener::Connecting(addr)) = self.relay_listeners.remove(id) {
-            self.relay_listeners
-                .insert(id.clone(), RelayListener::Connected(addr.clone()));
+            let action = self.new_relay_address(addr, id.clone());
+            self.outbox_to_swarm.push_back(action);
         }
 
         match self.outgoing_relay_requests.remove(id) {
@@ -402,8 +421,7 @@ impl NetworkBehaviour for Relay {
                 }
                 Poll::Ready(Some(TransportToBehaviourMsg::ListenRequest { address, peer_id })) => {
                     if self.connected_peers.contains(&peer_id) {
-                        self.relay_listeners
-                            .insert(peer_id, RelayListener::Connected(address));
+                        return Poll::Ready(self.new_relay_address(address, peer_id));
                     } else {
                         self.relay_listeners
                             .insert(peer_id.clone(), RelayListener::Connecting(address));
@@ -423,6 +441,8 @@ impl NetworkBehaviour for Relay {
 }
 
 pub enum BehaviourToTransportMsg {
+    NewAddress(Multiaddr),
+    //AddressExpired(Multiaddr), TODO
     IncomingRelayedConnection {
         stream: NegotiatedSubstream,
         source: PeerId,
