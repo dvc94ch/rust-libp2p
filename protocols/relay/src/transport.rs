@@ -83,6 +83,7 @@ impl<T: Transport + Clone> Transport for RelayTransportWrapper<T> {
     type Dial = EitherFuture<<T as Transport>::Dial, RelayedDial>;
 
     fn listen_on(self, addr: Multiaddr) -> Result<Self::Listener, TransportError<Self::Error>> {
+        let local_addr = addr.clone();
         let (is_relay, addr) = is_relay_listen_address(addr);
         if !is_relay {
             let inner_listener = match self.inner_transport.listen_on(addr) {
@@ -100,6 +101,7 @@ impl<T: Transport + Clone> Transport for RelayTransportWrapper<T> {
                 // connections?
                 from_behaviour: self.from_behaviour.clone(),
                 msg_to_behaviour: None,
+                local_addr: None,
             });
         }
 
@@ -121,6 +123,7 @@ impl<T: Transport + Clone> Transport for RelayTransportWrapper<T> {
             inner_listener: None,
             from_behaviour: self.from_behaviour.clone(),
             msg_to_behaviour,
+            local_addr: Some(local_addr),
         })
     }
 
@@ -219,6 +222,7 @@ pub struct RelayListener<T: Transport> {
     from_behaviour: Arc<Mutex<mpsc::Receiver<BehaviourToTransportMsg>>>,
 
     msg_to_behaviour: Option<BoxFuture<'static, Result<(), mpsc::SendError>>>,
+    local_addr: Option<Multiaddr>,
 }
 
 impl<T: Transport> Stream for RelayListener<T> {
@@ -274,12 +278,10 @@ impl<T: Transport> Stream for RelayListener<T> {
                 stream,
                 source,
             })) => {
+
                 return Poll::Ready(Some(Ok(ListenerEvent::Upgrade {
                     upgrade: RelayedListenerUpgrade::Relayed(Some(stream)),
-                    // TODO: Fix. Empty is not the right thing here. Should the address of the relay
-                    // be mentioned here?
-                    // Could one do this via IntoProtoHandler trait?
-                    local_addr: Multiaddr::empty(),
+                    local_addr: this.local_addr.clone().unwrap_or_else(Multiaddr::empty),
                     remote_addr: Protocol::P2p(source.into()).into(),
                 })));
             }
