@@ -22,16 +22,12 @@ use crate::message_proto::{circuit_relay, circuit_relay::Status, CircuitRelay};
 use crate::protocol::{MAX_ACCEPTED_MESSAGE_LEN, Peer};
 
 use futures::future::{BoxFuture, Either, select};
-use futures::io::{Error, ErrorKind};
+use futures::io::ErrorKind;
 use futures::prelude::*;
 use futures_codec::Framed;
 use libp2p_core::{Multiaddr, PeerId};
-
 use prost::Message;
-
 use std::sync::{Arc, Mutex};
-
-use std::{io};
 use std::io::Cursor;
 use unsigned_varint::codec::UviBytes;
 

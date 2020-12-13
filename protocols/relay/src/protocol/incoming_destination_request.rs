@@ -25,7 +25,7 @@ use futures::{future::BoxFuture, prelude::*};
 use futures_codec::Framed;
 use libp2p_core::{Multiaddr, PeerId};
 use prost::Message;
-use std::{error, io};
+use std::io;
 use std::io::Cursor;
 use unsigned_varint::codec::UviBytes;
 

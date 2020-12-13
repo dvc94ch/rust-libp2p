@@ -18,15 +18,13 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use libp2p_core::{upgrade::UpgradeError, PeerId};
+use libp2p_core::upgrade::UpgradeError;
 use std::{fmt, io};
 
 #[derive(Debug)]
 pub enum RelayError<E> {
     Io(io::Error),
     Upgrade(UpgradeError<E>),
-    NoRelayFor(PeerId),
-    Message(&'static str),
     #[doc(hidden)]
     __Nonexhaustive,
 }
@@ -39,8 +37,6 @@ where
         match self {
             RelayError::Io(e) => write!(f, "i/o error: {}", e),
             RelayError::Upgrade(e) => write!(f, "upgrade error: {}", e),
-            RelayError::NoRelayFor(p) => write!(f, "no relay for peer: {:?}", p),
-            RelayError::Message(m) => write!(f, "{}", m),
             RelayError::__Nonexhaustive => f.write_str("__Nonexhaustive"),
         }
     }
@@ -54,8 +50,6 @@ where
         match self {
             RelayError::Io(e) => Some(e),
             RelayError::Upgrade(e) => Some(e),
-            RelayError::NoRelayFor(_) => None,
-            RelayError::Message(_) => None,
             RelayError::__Nonexhaustive => None,
         }
     }

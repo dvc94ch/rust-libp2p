@@ -20,9 +20,9 @@
 
 use crate::message_proto::circuit_relay;
 
-use libp2p_core::{multiaddr::Error as MultiaddrError, upgrade, Multiaddr, PeerId};
+use libp2p_core::{multiaddr::Error as MultiaddrError, Multiaddr, PeerId};
 use smallvec::SmallVec;
-use std::{convert::TryFrom, error, fmt, io};
+use std::{convert::TryFrom, error, fmt};
 
 /// Any message received on the wire whose length is superior to that will be refused and will
 /// trigger an error.
