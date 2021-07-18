@@ -12,19 +12,10 @@ categories = ["network-programming", "asynchronous"]
 [features]
 default = [
     "dns-async-std",
-    "floodsub",
-    "identify",
-    "kad",
-    "gossipsub",
-    "mdns",
     "mplex",
     "noise",
-    "ping",
-    "plaintext",
-    "pnet",
-    "relay",
-    "request-response",
     "tcp-async-io",
+    "websocket",
     "yamux",
 ]
 deflate = ["libp2p-deflate"]
