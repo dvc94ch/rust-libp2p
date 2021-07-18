@@ -185,7 +185,7 @@ fn bootstrap() {
                 for (i, swarm) in swarms.iter_mut().enumerate() {
                     loop {
                         match swarm.poll_next_unpin(ctx) {
-                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                                 id, result: QueryResult::Bootstrap(Ok(ok)), ..
                             }))) => {
                                 assert_eq!(id, qid);
@@ -196,6 +196,10 @@ fn bootstrap() {
                                 }
                                 first = false;
                                 if ok.num_remaining == 0 {
+                                    assert_eq!(
+                                        swarm.behaviour_mut().queries.size(), 0,
+                                        "Expect no remaining queries when `num_remaining` is zero.",
+                                    );
                                     let mut known = HashSet::new();
                                     for b in swarm.behaviour_mut().kbuckets.iter() {
                                         for e in b.iter() {
@@ -265,7 +269,7 @@ fn query_iter() {
                 for (i, swarm) in swarms.iter_mut().enumerate() {
                     loop {
                         match swarm.poll_next_unpin(ctx) {
-                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                                 id, result: QueryResult::GetClosestPeers(Ok(ok)), ..
                             }))) => {
                                 assert_eq!(id, qid);
@@ -318,7 +322,7 @@ fn unresponsive_not_returned_direct() {
             for swarm in &mut swarms {
                 loop {
                     match swarm.poll_next_unpin(ctx) {
-                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                             result: QueryResult::GetClosestPeers(Ok(ok)), ..
                         }))) => {
                             assert_eq!(&ok.key[..], search_target.to_bytes().as_slice());
@@ -368,7 +372,7 @@ fn unresponsive_not_returned_indirect() {
             for swarm in &mut swarms {
                 loop {
                     match swarm.poll_next_unpin(ctx) {
-                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                             result: QueryResult::GetClosestPeers(Ok(ok)), ..
                         }))) => {
                             assert_eq!(&ok.key[..], search_target.to_bytes().as_slice());
@@ -412,7 +416,7 @@ fn get_record_not_found() {
             for swarm in &mut swarms {
                 loop {
                     match swarm.poll_next_unpin(ctx) {
-                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                             id, result: QueryResult::GetRecord(Err(e)), ..
                         }))) => {
                             assert_eq!(id, qid);
@@ -519,10 +523,10 @@ fn put_record() {
                 for swarm in &mut swarms {
                     loop {
                         match swarm.poll_next_unpin(ctx) {
-                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                                 id, result: QueryResult::PutRecord(res), stats
                             }))) |
-                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                                 id, result: QueryResult::RepublishRecord(res), stats
                             }))) => {
                                 assert!(qids.is_empty() || qids.remove(&id));
@@ -652,7 +656,7 @@ fn get_record() {
             for swarm in &mut swarms {
                 loop {
                     match swarm.poll_next_unpin(ctx) {
-                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                             id,
                             result: QueryResult::GetRecord(Ok(GetRecordOk {
                                 records, cache_candidates
@@ -702,7 +706,7 @@ fn get_record_many() {
             for swarm in &mut swarms {
                 loop {
                     match swarm.poll_next_unpin(ctx) {
-                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                             id,
                             result: QueryResult::GetRecord(Ok(GetRecordOk { records, .. })),
                             ..
@@ -784,10 +788,10 @@ fn add_provider() {
                 for swarm in &mut swarms {
                     loop {
                         match swarm.poll_next_unpin(ctx) {
-                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                                 id, result: QueryResult::StartProviding(res), ..
                             }))) |
-                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                            Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                                 id, result: QueryResult::RepublishProvider(res), ..
                             }))) => {
                                 assert!(qids.is_empty() || qids.remove(&id));
@@ -903,7 +907,7 @@ fn exceed_jobs_max_queries() {
                 loop {
                     if let Poll::Ready(Some(e)) = swarm.poll_next_unpin(ctx) {
                         match e {
-                            SwarmEvent::Behaviour(KademliaEvent::QueryResult {
+                            SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted {
                                 result: QueryResult::GetClosestPeers(Ok(r)), ..
                             }) => break assert!(r.peers.is_empty()),
                             SwarmEvent::Behaviour(e) => panic!("Unexpected event: {:?}", e),
@@ -972,7 +976,7 @@ fn disjoint_query_does_not_finish_before_all_paths_did() {
             for (i, swarm) in [&mut alice, &mut trudy].iter_mut().enumerate() {
                 loop {
                     match swarm.poll_next_unpin(ctx) {
-                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult{
+                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted{
                             result: QueryResult::GetRecord(result),
                              ..
                         }))) => {
@@ -1025,7 +1029,7 @@ fn disjoint_query_does_not_finish_before_all_paths_did() {
             for (i, swarm) in [&mut alice, &mut bob].iter_mut().enumerate() {
                 loop {
                     match swarm.poll_next_unpin(ctx) {
-                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::QueryResult{
+                        Poll::Ready(Some(SwarmEvent::Behaviour(KademliaEvent::OutboundQueryCompleted{
                             result: QueryResult::GetRecord(result),
                             ..
                         }))) => {

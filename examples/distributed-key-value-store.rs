@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Called when `kademlia` produces an event.
         fn inject_event(&mut self, message: KademliaEvent) {
             match message {
-                KademliaEvent::QueryResult { result, .. } => match result {
+                KademliaEvent::OutboundQueryCompleted { result, .. } => match result {
                     QueryResult::GetProviders(Ok(ok)) => {
                         for peer in ok.providers {
                             println!(
@@ -175,8 +175,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         loop {
             match swarm.poll_next_unpin(cx) {
                 Poll::Ready(Some(event)) => {
-                    if let SwarmEvent::NewListenAddr(addr) = event {
-                        println!("Listening on {:?}", addr);
+                    if let SwarmEvent::NewListenAddr { address, .. } = event {
+                        println!("Listening on {:?}", address);
                     }
                 }
                 Poll::Ready(None) => return Poll::Ready(Ok(())),

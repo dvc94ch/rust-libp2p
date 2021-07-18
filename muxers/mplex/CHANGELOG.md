@@ -1,6 +1,10 @@
-# 0.29.0 [unreleased]
+# 0.29.0 [2021-07-12]
 
 - Update dependencies.
+
+- Support stream IDs of up to 60 bit length. See [PR 2094] for details.
+
+[PR 2094]: https://github.com/libp2p/rust-libp2p/pull/2094
 
 # 0.28.0 [2021-03-17]
 
